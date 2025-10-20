@@ -7,7 +7,7 @@ from datasets import load_dataset
 
 # Configurações
 model_name = "mistralai/Mistral-7B-Instruct-v0.2"
-data_file_path = "../datasets/qa_dataset.json"  # <<== Ajuste aqui o nome do seu arquivo JSON
+data_file_path = "./datasets/qa_dataset.json"  # <<== Ajuste aqui o nome do seu arquivo JSON
 output_dir = "./qlora-output"
 max_length = 512
 
