@@ -1,4 +1,4 @@
-# Fine-tuning with QLoRA on Mistral 7B
+# Efficient QLoRA Fine-Tuning on Oracle Cloud NVIDIA GPUs
 
 ## 🎯 Introduction
 
