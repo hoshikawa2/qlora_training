@@ -2,8 +2,7 @@
 
 ## 🎯 Introduction
 
-Training large language models (LLMs) from scratch is unfeasible for most people, as it requires hundreds of GPUs and billions of tokens. However, it is possible to adapt pre-trained models (such as Mistral-7B or any other model) for specific use cases using lighter techniques such as LoRA and QLoRA. These allow training only a fraction of the original parameters with 4-bit quantization, drastically reducing memory consumption.
-
+Training large language models (LLMs) from scratch is unfeasible for most people, as it requires hundreds of GPUs and billions of tokens. On Oracle Cloud Infrastructure (OCI), however, you can leverage powerful NVIDIA GPUs—such as the A10 or A100—to adapt pre-trained models (like Mistral-7B) for your own use cases. By applying lightweight techniques such as LoRA and QLoRA, you only train a fraction of the parameters while using 4-bit quantization to drastically reduce memory requirements. This approach makes fine-tuning on enterprise-grade GPUs in the cloud both cost-effective and scalable, whether for experimentation on a single RTX GPU or for distributed training across clustered NVIDIA accelerators.
 ### Real Applications
 
 - Specialized chatbots: healthcare, legal, finance.
