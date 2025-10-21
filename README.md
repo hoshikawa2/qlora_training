@@ -35,7 +35,7 @@ Install required packages:
 pip install torch transformers datasets peft bitsandbytes accelerate
 ```
 
-Download the training dataset in JSON format:
+Download a training dataset in JSON format like this format:
 ```json
 [
   {"text": "Question: What is QLoRA?\nAnswer: An efficient fine-tuning technique using 4-bit quantization."},
@@ -45,9 +45,136 @@ Download the training dataset in JSON format:
 
 Save as ./datasets/qa_dataset.json.
 
-Compatible GPU: preferably one with 16 GB of VRAM or more (e.g., RTX 3090, 4090, 5090).
+## ⚡ GPU Compatibility and Recommendations
+
+Running and fine-tuning large language models is computationally intensive. While it is possible to execute inference on CPUs, performance is significantly slower and often impractical for real-time or large-scale workloads. For this reason, using a dedicated GPU is strongly recommended.
+
+### Why GPUs?
+
+GPUs are optimized for massively parallel matrix operations, which are at the core of transformer models. This parallelism translates directly into:
+
+Faster training and inference — models that would take hours on CPU can be executed in minutes on GPU.
+
+Support for larger models — GPUs provide high-bandwidth memory (VRAM), enabling models with billions of parameters to fit and run efficiently.
+
+Energy efficiency — despite high TDPs, GPUs often consume less power per token generated than CPUs, thanks to their optimized architecture.
+
+### Why NVIDIA?
+
+Although other vendors are entering the AI market, NVIDIA GPUs remain the de-facto standard for LLM training and deployment because:
+
+They offer CUDA and cuDNN, mature software stacks with deep integration into PyTorch, TensorFlow, and Hugging Face Transformers.
+
+Popular quantization and fine-tuning libraries (e.g., BitsAndBytes, PEFT, Accelerate) are optimized for NVIDIA architectures.
+
+Broad ecosystem support ensures driver stability, optimized kernels, and multi-GPU scalability.
+
+### Examples of GPUs
+
+Consumer RTX Series (e.g., RTX 3090, 4090, 5090):
+These GPUs are widely available, offering 16–24 GB VRAM (3090/4090) or more in newer generations like the RTX 5090. They are suitable for personal or workstation setups, providing excellent performance for inference and QLoRA fine-tuning.
+
+Data Center GPUs (e.g., NVIDIA A10, A100, H100):
+Enterprise GPUs are designed for continuous workloads, offering higher VRAM (24–80 GB), ECC memory for reliability, and optimized virtualization capabilities. For example:
+
+An A10 (24 GB) is an affordable option for cloud deployments.
+
+An A100 (40–80 GB) or H100 supports massive batch sizes and full fine-tuning of very large models.
+
+### Clusters and Memory Considerations
+
+VRAM capacity is the main limiting factor. A 7B parameter model typically requires ~14–16 GB in FP16, but can run on ~8 GB when quantized (e.g., 4-bit QLoRA). Larger models (13B, 34B, 70B) may require 24 GB or more.
+
+Clustered GPU setups (multi-GPU training) enable splitting the model across devices using tensor or pipeline parallelism. This is essential for very large models but introduces complexity in synchronization and scaling.
+
+Cloud providers often expose A10, A100, or L4 instances that scale horizontally. Choosing between a single powerful GPU and a cluster of smaller GPUs depends on workload:
+
+Single GPU: simpler setup, fewer synchronization bottlenecks.
+
+Multi-GPU cluster: better for large-scale training or serving multiple requests concurrently.
+
+### Summary
+
+For most developers:
+
+RTX 4090/5090 is an excellent choice for local fine-tuning and inference of 7B–13B models.
+
+A10/A100 GPUs are better suited for enterprise clusters or cloud deployments, where high availability and VRAM capacity matter more than cost.
+
+When planning GPU resources, always balance VRAM requirements, throughput, and scalability needs. Proper hardware selection ensures that training and inference are both feasible and efficient.
+
 
 ## 📝 Step-by-step code
+
+This step-by-step pipeline is organized to keep **memory usage low**
+while preserving model quality and reproducibility:
+
+-   **Quantization first (4-bit with BitsAndBytes)** reduces VRAM so you
+    can load a 7B model on a single modern GPU without sacrificing too
+    much accuracy. Then we layer **LoRA adapters** on top, updating only
+    low-rank matrices instead of full weights --- which dramatically
+    cuts the number of trainable parameters and speeds up training.\
+-   We explicitly **set the tokenizer's `pad_token` to `eos_token`** to
+    avoid padding issues with causal LMs and keep batching simple and
+    efficient.\
+-   Using **`device_map="auto"`** delegates placement (GPU/CPU/offload)
+    to Accelerate, ensuring the model fits while exploiting available
+    GPU memory.\
+-   The **data pipeline** keeps labels equal to inputs for next-token
+    prediction and uses a **LM data collator** (no MLM), which is the
+    correct objective for decoder-only transformers.\
+-   **Trainer** abstracts the training loop (forward, backward,
+    optimization, logging, checkpoints), reducing boilerplate and
+    error-prone code.
+
+### 🏗️ Training Architecture (End-to-End)
+
+``` mermaid
+flowchart LR
+  A[A-Raw JSON Dataset] --> B[B-Tokenization & Formatting]
+  B --> C[C-4-bit Quantized Base Model]
+  C --> D[D-LoRA Adapters PEFT]
+  D --> E[E-Trainer Loop FP16/4-bit]
+  E --> F[F-Checkpoints qlora-output]
+  F --> G[G-Merge Adapters → Base]
+  G --> H[H-Unified Export safetensors]
+  H --> I[I-Inference Transformers or GGUF Ollama/llama.cpp]
+```
+
+-   **C → D**: Only LoRA layers are trainable; the base model stays
+    quantized/frozen.
+-   **F → G → H**: After training, you **merge** LoRA into the base,
+    then **export** to a production-friendly format (single or sharded
+    `safetensors`) or convert to **GGUF** for lightweight runtimes.
+
+### 🚶 The core steps (and why each matters)
+
+1.  **Main configurations** --- Centralize base model, dataset path,
+    output directory, and sequence length so experiments are
+    reproducible and easy to tweak.
+2.  **Quantization with BitsAndBytes (4-bit)** --- Shrinks memory
+    footprint and bandwidth pressure; crucial for single-GPU training.
+3.  **Load tokenizer & model** --- Set `pad_token = eos_token` (causal
+    LM best practice) and let `device_map="auto"` place weights
+    efficiently.
+4.  **Prepare LoRA (PEFT)** --- Target attention projections (`q_proj`,
+    `k_proj`, `v_proj`, `o_proj`) for maximal quality/latency gains per
+    parameter trained.
+5.  **Dataset & tokenization** --- Labels mirror inputs for next-token
+    prediction; truncation/padding give stable batch shapes.
+6.  **Data collator (no MLM)** --- Correct objective for decoder-only
+    models; ensures clean, consistent batches.
+7.  **Training arguments** --- Small batch + gradient accumulation
+    balances VRAM limits with throughput; `fp16=True` saves memory.
+8.  **Trainer** --- Handles the full loop
+    (forward/backward/optim/ckpts/logging) to reduce complexity and
+    bugs.\
+9.  **Train & save** --- Persist adapters, PEFT config, and tokenizer
+    for later merge or continued training.
+10. **(Post) Merge & export** --- Fuse adapters into the base, export to
+    `safetensors`, or convert to **GGUF** for Ollama/llama.cpp if you
+    need a single-file runtime.
+
 
 1. Main configurations
    
